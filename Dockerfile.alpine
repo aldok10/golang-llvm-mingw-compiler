@@ -91,7 +91,7 @@ ENV PATH="/usr/local/go/bin:/opt/llvm-mingw/bin:${PATH}"
 ENV GOROOT=/usr/local/go
 
 # Also add /opt/llvm-mingw to LD_LIBRARY_PATH for gcompat
-ENV LD_LIBRARY_PATH="/opt/llvm-mingw/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/llvm-mingw/lib:${LD_LIBRARY_PATH:-}"
 
 # Verify installations
 RUN set -eux; \
