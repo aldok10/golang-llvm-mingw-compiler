@@ -20,7 +20,7 @@ SHELL := /bin/bash
 
 # ---- Configurable (major.minor only - patch auto-resolved) ----
 GO_VERSIONS    ?= 1.24 1.25 1.26
-LLVM_VERSIONS  ?= 22.1 21.1 20.1
+LLVM_VERSIONS  ?= 20.1 21.1 22.1
 REGISTRY           ?= ghcr.io/aldok10
 IMAGE_NAME         ?= golang-llvm-mingw-compiler
 DOCKER_HUB_REPO    ?= docker.io/akarendra835/llvm-mingw-golang

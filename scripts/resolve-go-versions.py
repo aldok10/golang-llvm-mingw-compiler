@@ -8,7 +8,7 @@ Usage (resolve patches): resolve-go-versions.py 1.24 1.25 1.26
 Output: 1.24.13 1.25.11 1.26.4 (one per line)
 
 Usage (list top N major.minor): resolve-go-versions.py --list [N]
-Output (default N=3): 1.26 1.25 1.24 (one per line, newest first)
+Output (default N=3): 1.24 1.25 1.26 (one per line, oldest first)
 """
 
 import re
@@ -37,10 +37,12 @@ def fetch_go_versions():
 
 
 def list_top_versions(n: int = 3):
-    """Output the top N major.minor versions sorted descending."""
+    """Output the top N major.minor versions, oldest first."""
     latest = fetch_go_versions()
-    sorted_versions = sorted(latest.keys(), key=parse_version, reverse=True)
-    for v in sorted_versions[:n]:
+    # Sort newest first, take top N, then reverse for output
+    sorted_versions = sorted(latest.keys(), key=parse_version, reverse=True)[:n]
+    sorted_versions.reverse()
+    for v in sorted_versions:
         print(v)
     if not sorted_versions:
         print("WARNING: No Go versions found on go.dev", file=sys.stderr)

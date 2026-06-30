@@ -8,7 +8,7 @@ Usage (resolve tags): resolve-llvm-versions.py 22.1 21.1
 Output: 20260616 20251216 (one per line)
 
 Usage (list top N major.minor): resolve-llvm-versions.py --list [N]
-Output (default N=3): 22.1 21.1 20.1 (one per line, newest first)
+Output (default N=3): 20.1 21.1 22.1 (one per line, oldest first)
 
 Matches by LLVM version embedded in release name, e.g.:
   "llvm-mingw 20260616 with LLVM 22.1.8" -> LLVM 22.1 -> tag 20260616
@@ -65,10 +65,12 @@ def fetch_llvm_releases():
 
 
 def list_top_versions(n: int = 3):
-    """Output the top N LLVM major.minor versions sorted descending."""
+    """Output the top N LLVM major.minor versions, oldest first."""
     _, all_minors = fetch_llvm_releases()
-    sorted_versions = sorted(all_minors, key=parse_llvm_minor, reverse=True)
-    for v in sorted_versions[:n]:
+    # Sort newest first, take top N, then reverse for output
+    sorted_versions = sorted(all_minors, key=parse_llvm_minor, reverse=True)[:n]
+    sorted_versions.reverse()
+    for v in sorted_versions:
         print(v)
     if not sorted_versions:
         print("WARNING: No LLVM versions found in GitHub releases", file=sys.stderr)
