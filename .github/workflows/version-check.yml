@@ -57,6 +57,8 @@ jobs:
       # === Check Go patch (informational, auto-resolved at build time) ===
       - name: Check Go patch versions
         id: check-go-patch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           RESOLVED=$(python3 scripts/resolve-go-versions.py ${{ env.CURRENT_GO }} 2>/dev/null | tr '\n' ' ' | xargs || echo "resolve failed")
           echo "resolved=$RESOLVED" >> $GITHUB_OUTPUT
@@ -65,6 +67,8 @@ jobs:
       # === Check LLVM patch (informational) ===
       - name: Check LLVM-mingw patch versions
         id: check-llvm-patch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           RESOLVED=$(python3 scripts/resolve-llvm-versions.py ${{ env.CURRENT_LLVM }} 2>/dev/null | tr '\n' ' ' | xargs || echo "resolve failed")
           echo "resolved=$RESOLVED" >> $GITHUB_OUTPUT
@@ -94,6 +98,8 @@ jobs:
       # === Check LLVM major versions ===
       - name: Check LLVM-mingw major versions
         id: check-llvm-major
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LATEST_LLVM=$(python3 scripts/resolve-llvm-versions.py --list 2>/dev/null || echo "")
           CURRENT_LLVM="${{ env.CURRENT_LLVM }}"
@@ -227,19 +233,22 @@ jobs:
 
       - name: Build and push all images
         run: |
-          # If check detected new major versions, use them; otherwise defaults from Makefile
-          GO_MAJOR="${{ needs.check.outputs.go_major_latest }}"
-          LLVM_MAJOR="${{ needs.check.outputs.llvm_major_latest }}"
-          if [ -n "$GO_MAJOR" ] && [ -n "$LLVM_MAJOR" ]; then
-            echo "Building with latest versions: Go=$GO_MAJOR LLVM=$LLVM_MAJOR"
-            make build-all GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
-            make push        GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
-            make push-docker-hub GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
-          else
-            echo "Building with default versions from Makefile"
+          # Use pre-resolved versions from check job to avoid re-resolving in CI
+          # (which can hit GitHub API rate limits). The check job resolves major.minor
+          # to full patches/tags, which we pass directly to make.
+          GO_RESOLVED="${{ needs.check.outputs.go_resolved }}"
+          LLVM_RESOLVED="${{ needs.check.outputs.llvm_resolved }}"
+
+          if [ -z "$GO_RESOLVED" ] || [ -z "$LLVM_RESOLVED" ]; then
+            echo "WARNING: Pre-resolved versions not available, falling back to defaults"
             make build-all
             make push
             make push-docker-hub
+          else
+            echo "Building with resolved: Go=$GO_RESOLVED LLVM=$LLVM_RESOLVED"
+            make build-all GO_VERSIONS="$GO_RESOLVED" LLVM_VERSIONS="$LLVM_RESOLVED"
+            make push        GO_VERSIONS="$GO_RESOLVED" LLVM_VERSIONS="$LLVM_RESOLVED"
+            make push-docker-hub GO_VERSIONS="$GO_RESOLVED" LLVM_VERSIONS="$LLVM_RESOLVED"
           fi
 
       - name: Summary

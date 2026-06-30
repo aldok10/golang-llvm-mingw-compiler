@@ -27,14 +27,27 @@ DOCKER_HUB_REPO    ?= docker.io/akarendra835/llvm-mingw-golang
 
 # ---- Auto-resolve Go patch versions ----
 # For each major.minor, fetch go.dev and find the latest patch.
+# Only runs if versions are major.minor format (2 segments, like "1.26").
+# If already resolved (3 segments, like "1.26.4"), uses as-is.
+GO_SEGMENTS := $(words $(subst ., ,$(firstword $(GO_VERSIONS))))
+ifeq ($(GO_SEGMENTS),2)
 RESOLVED_GO := $(shell python3 scripts/resolve-go-versions.py $(GO_VERSIONS) 2>/dev/null)
+else
+RESOLVED_GO := $(GO_VERSIONS)
+endif
 ifeq ($(strip $(RESOLVED_GO)),)
 RESOLVED_GO := $(GO_VERSIONS)
 endif
 
 # ---- Auto-resolve LLVM-mingw release tags ----
 # For each LLVM major.minor, fetch GitHub releases and find the latest tag.
+# Only runs if versions are major.minor (2 segments). Skips for resolved tags.
+LLVM_SEGMENTS := $(words $(subst ., ,$(firstword $(LLVM_VERSIONS))))
+ifeq ($(LLVM_SEGMENTS),2)
 RESOLVED_LLVM := $(shell python3 scripts/resolve-llvm-versions.py $(LLVM_VERSIONS) 2>/dev/null)
+else
+RESOLVED_LLVM := $(LLVM_VERSIONS)
+endif
 ifeq ($(strip $(RESOLVED_LLVM)),)
 RESOLVED_LLVM := $(LLVM_VERSIONS)
 endif

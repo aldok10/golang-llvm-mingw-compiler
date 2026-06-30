@@ -15,9 +15,23 @@ Matches by LLVM version embedded in release name, e.g.:
 """
 
 import json
+import os
 import re
 import sys
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
+
+
+def github_request(url: str) -> bytes:
+    """Make a request to GitHub API with optional token auth."""
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "resolve-llvm-versions/1.0",
+    }
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request(url, headers=headers)
+    return urlopen(req, timeout=30).read()
 
 
 def parse_llvm_minor(v: str) -> tuple:
@@ -32,11 +46,9 @@ def fetch_llvm_releases():
     latest_per_minor: {llvm_minor: (patch, tag)}
     all_minors: set of all LLVM major.minor strings seen with ubuntu-22.04 assets.
     """
-    req = urlopen(
+    data = json.loads(github_request(
         "https://api.github.com/repos/mstorsjo/llvm-mingw/releases?per_page=100",
-        timeout=30,
-    )
-    data = json.loads(req.read())
+    ))
 
     latest = {}
     all_minors = set()
