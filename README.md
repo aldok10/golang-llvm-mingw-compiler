@@ -86,9 +86,13 @@ The build matrix combines every Go version with every LLVM version for both base
 
 Default: **12 images** (3 Go x 2 LLVM x 2 bases).
 
-## Push to GitHub Container Registry
+## Push to Registry
 
-### Prerequisites
+The Makefile dual-tags every image with both a local name and a registry-qualified name (`<REGISTRY>/<IMAGE_NAME>:<tag>`). By default images are pushed to GitHub Container Registry. To push to Docker Hub or another registry, override `REGISTRY`.
+
+### Push to GitHub Container Registry
+
+#### Prerequisites
 
 1. A [GitHub token](https://github.com/settings/tokens) with `write:packages` scope
 2. Login to `ghcr.io`:
@@ -97,39 +101,82 @@ Default: **12 images** (3 Go x 2 LLVM x 2 bases).
 echo $GITHUB_TOKEN | docker login ghcr.io -u <username> --password-stdin
 ```
 
-### Push All Images
+#### Push All Images
 
 ```bash
 make push
 ```
 
-### Push Specific Base
+#### Push Specific Base
 
 ```bash
 make push-ubuntu
 make push-alpine
 ```
 
-### Tag Naming
+### Push to Docker Hub
 
-Images are dual-tagged:
+#### Prerequisites
 
-- `golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616`
-- `ghcr.io/aldok10/golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616`
-
-### Custom Registry
-
-Override `REGISTRY` and `IMAGE_NAME`:
+1. A [Docker Hub](https://hub.docker.com) account
+2. Login:
 
 ```bash
-make push REGISTRY=docker.io/username IMAGE_NAME=my-cross-compiler
+docker login -u <dockerhub-username>
 ```
 
-Or set in `.env`:
+#### Push All Images
 
+```bash
+make push REGISTRY=docker.io/<dockerhub-username>
 ```
+
+#### Push Specific Base
+
+```bash
+make push-ubuntu REGISTRY=docker.io/<dockerhub-username>
+make push-alpine REGISTRY=docker.io/<dockerhub-username>
+```
+
+#### Single Image (manual)
+
+```bash
+# Tag with Docker Hub prefix
+docker tag golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616 \
+  docker.io/<username>/golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616
+
+# Push
+docker push docker.io/<username>/golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616
+```
+
+### Push to Private Registry
+
+```bash
+make push REGISTRY=registry.example.com/my-team
+```
+
+### Tag Naming
+
+Images are dual-tagged at build time:
+
+| Tag | Example |
+|-----|---------|
+| Local | `golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616` |
+| Registry | `ghcr.io/aldok10/golang-llvm-mingw-compiler:ubuntu-22.04-go1.26.4-llvm20260616` |
+
+Tag pattern: `<IMAGE_NAME>:<base>-go<go-version>-llvm<release-tag>`
+
+### Custom Registry via `.env`
+
+```env
 REGISTRY=docker.io/username
 IMAGE_NAME=my-cross-compiler
+```
+
+Then:
+
+```bash
+make push
 ```
 
 ## Configuration
