@@ -51,22 +51,41 @@ RUN set -eux; \
 # Install Go
 RUN set -eux; \
     go_arch="${TARGETARCH}"; \
-    [ "${TARGETARCH}" = "amd64" ] && go_arch="amd64" || true; \
-    [ "${TARGETARCH}" = "arm64" ] && go_arch="arm64" || true; \
-    curl -fsSLo /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.${TARGETOS}-${go_arch}.tar.gz"; \
+    case "${TARGETARCH}" in \
+      amd64) go_arch="amd64" ;; \
+      arm64) go_arch="arm64" ;; \
+      arm)   go_arch="armv6l" ;; \
+      386|s390x|ppc64le|riscv64|mips64le|mips64|loong64) go_arch="${TARGETARCH}" ;; \
+      *) echo "ERROR: unsupported Go arch ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/go.tgz --retry 5 --connect-timeout 30 "https://go.dev/dl/go${GO_VERSION}.${TARGETOS}-${go_arch}.tar.gz"; \
     tar -C /usr/local -xzf /tmp/go.tgz; \
     rm /tmp/go.tgz
 
 # Install llvm-mingw (msvcrt variant -- uses gcompat for glibc)
+# Only available for amd64/arm64 hosts from upstream
 RUN set -eux; \
-    llvm_arch="${TARGETARCH}"; \
-    [ "${TARGETARCH}" = "amd64" ] && llvm_arch="x86_64" || true; \
-    [ "${TARGETARCH}" = "arm64" ] && llvm_arch="aarch64" || true; \
-    llvm_url="https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_VERSION}/llvm-mingw-${LLVM_VERSION}-msvcrt-ubuntu-22.04-${llvm_arch}.tar.xz"; \
-    curl -fsSLo /tmp/llvm-mingw.tar.xz "${llvm_url}"; \
-    mkdir -p /opt/llvm-mingw; \
-    tar -C /opt/llvm-mingw --strip-components=1 -xJf /tmp/llvm-mingw.tar.xz; \
-    rm /tmp/llvm-mingw.tar.xz
+    case "${TARGETARCH}" in \
+      amd64) \
+        llvm_arch="x86_64"; \
+        llvm_url="https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_VERSION}/llvm-mingw-${LLVM_VERSION}-msvcrt-ubuntu-22.04-${llvm_arch}.tar.xz"; \
+        curl -fsSLo /tmp/llvm-mingw.tar.xz --retry 5 --connect-timeout 30 "${llvm_url}"; \
+        mkdir -p /opt/llvm-mingw; \
+        tar -C /opt/llvm-mingw --strip-components=1 -xJf /tmp/llvm-mingw.tar.xz; \
+        rm /tmp/llvm-mingw.tar.xz; \
+        ;; \
+      arm64) \
+        llvm_arch="aarch64"; \
+        llvm_url="https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_VERSION}/llvm-mingw-${LLVM_VERSION}-msvcrt-ubuntu-22.04-${llvm_arch}.tar.xz"; \
+        curl -fsSLo /tmp/llvm-mingw.tar.xz --retry 5 --connect-timeout 30 "${llvm_url}"; \
+        mkdir -p /opt/llvm-mingw; \
+        tar -C /opt/llvm-mingw --strip-components=1 -xJf /tmp/llvm-mingw.tar.xz; \
+        rm /tmp/llvm-mingw.tar.xz; \
+        ;; \
+      *) \
+        echo "WARNING: llvm-mingw not available for arch ${TARGETARCH}, skipping"; \
+        ;; \
+    esac
 
 ENV PATH="/usr/local/go/bin:/opt/llvm-mingw/bin:${PATH}"
 ENV GOROOT=/usr/local/go
@@ -77,7 +96,11 @@ ENV LD_LIBRARY_PATH="/opt/llvm-mingw/lib:${LD_LIBRARY_PATH}"
 # Verify installations
 RUN set -eux; \
     go version; \
-    ls /opt/llvm-mingw/bin/x86_64-w64-mingw32-clang >/dev/null 2>&1 && echo "llvm-mingw toolchain present" || echo "Warning: llvm-mingw not found"; \
+    if [ -d /opt/llvm-mingw/bin ]; then \
+      echo "llvm-mingw toolchain present"; \
+    else \
+      echo "Note: llvm-mingw not available for this architecture"; \
+    fi; \
     echo "Toolchain installed successfully"
 
 CMD ["/bin/ash"]

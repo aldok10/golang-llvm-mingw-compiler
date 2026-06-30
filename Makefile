@@ -189,14 +189,19 @@ $(foreach go,$(RESOLVED_GO),$(foreach llvm,$(RESOLVED_LLVM),$(eval $(call PUSH_D
 # Requires buildx with multi-arch driver (docker-container).
 # Builder name: multiarch (create with: docker buildx create --name multiarch --driver docker-container --bootstrap)
 
-BUILDX_BUILDER ?= multiarch
+BUILDX_BUILDER  ?= multiarch
+# All platforms supported by the buildx builder.
+# llvm-mingw binaries only exist for amd64 and arm64; other platforms get Go only.
+# Platforms supported by Ubuntu 22.04 base image.
+# llvm-mingw binaries only exist for amd64 and arm64; other platforms get Go only.
+BUILDX_PLATFORMS ?= linux/amd64,linux/amd64/v2,linux/arm64,linux/arm/v7,linux/ppc64le,linux/riscv64,linux/s390x
 
 define BUILDX_DOCKER_HUB_UBUNTU
 buildx-docker-hub-ubuntu-22.04-go$(1)-llvm$(2):
 	@echo "=== [buildx] ubuntu-22.04 go$(1) llvm$(2) multi-arch ==="
 	docker buildx build \
 		--builder $(BUILDX_BUILDER) \
-		--platform linux/amd64,linux/arm64 \
+		--platform $(BUILDX_PLATFORMS) \
 		--build-arg GO_VERSION="$(1)" \
 		--build-arg LLVM_VERSION="$(2)" \
 		-f Dockerfile.ubuntu \
@@ -210,7 +215,7 @@ buildx-docker-hub-alpine-go$(1)-llvm$(2):
 	@echo "=== [buildx] alpine go$(1) llvm$(2) multi-arch ==="
 	docker buildx build \
 		--builder $(BUILDX_BUILDER) \
-		--platform linux/amd64,linux/arm64 \
+		--platform $(BUILDX_PLATFORMS) \
 		--build-arg GO_VERSION="$(1)" \
 		--build-arg LLVM_VERSION="$(2)" \
 		-f Dockerfile.alpine \
