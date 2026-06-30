@@ -21,8 +21,9 @@ SHELL := /bin/bash
 # ---- Configurable (major.minor only - patch auto-resolved) ----
 GO_VERSIONS    ?= 1.24 1.25 1.26
 LLVM_VERSIONS  ?= 22.1 21.1 20.1 19.1 18.1 17.0
-REGISTRY       ?= ghcr.io/aldok10
-IMAGE_NAME     ?= golang-llvm-mingw-compiler
+REGISTRY           ?= ghcr.io/aldok10
+IMAGE_NAME         ?= golang-llvm-mingw-compiler
+DOCKER_HUB_REPO    ?= docker.io/akarendra835/llvm-mingw-golang
 
 # ---- Auto-resolve Go patch versions ----
 # For each major.minor, fetch go.dev and find the latest patch.
@@ -51,8 +52,18 @@ help:
 	@echo "  make push               Push all images to $(REGISTRY)"
 	@echo "  make push-ubuntu        Push Ubuntu images"
 	@echo "  make push-alpine        Push Alpine images"
+	@echo "  make push-docker-hub          Push all to Docker Hub ($(DOCKER_HUB_REPO))"
+	@echo "  make push-docker-hub-ubuntu   Push Ubuntu images to Docker Hub"
+	@echo "  make push-docker-hub-alpine   Push Alpine images to Docker Hub"
+	@echo "  make buildx-docker-hub        Multi-arch build+push (amd64+arm64) to Docker Hub"
+	@echo "  make buildx-docker-hub-ubuntu Multi-arch Ubuntu to Docker Hub"
+	@echo "  make buildx-docker-hub-alpine Multi-arch Alpine to Docker Hub"
 	@echo "  make list               List combinations"
 	@echo "  make clean              Remove local images"
+	@echo ""
+	@echo "Registries:"
+	@echo "  Default (GHCR): $(REGISTRY)/$(IMAGE_NAME)"
+	@echo "  Docker Hub:     $(DOCKER_HUB_REPO)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build-ubuntu-22.04-go1.26-llvm22.1    (major.minor shorthand)"
@@ -155,19 +166,93 @@ endef
 
 $(foreach go,$(RESOLVED_GO),$(foreach llvm,$(RESOLVED_LLVM),$(eval $(call PUSH_ALPINE,$(go),$(llvm)))))
 
+# ---- Docker Hub push targets ----
+# Tags + pushes local images to Docker Hub without rebuilding.
+
+define PUSH_DOCKER_HUB_UBUNTU
+push-docker-hub-ubuntu-22.04-go$(1)-llvm$(2): build-ubuntu-22.04-go$(1)-llvm$(2)
+	docker tag "$(IMAGE_NAME):ubuntu-22.04-go$(1)-llvm$(2)" "$(DOCKER_HUB_REPO):ubuntu-22.04-go$(1)-llvm$(2)"
+	docker push "$(DOCKER_HUB_REPO):ubuntu-22.04-go$(1)-llvm$(2)"
+endef
+
+define PUSH_DOCKER_HUB_ALPINE
+push-docker-hub-alpine-go$(1)-llvm$(2): build-alpine-go$(1)-llvm$(2)
+	docker tag "$(IMAGE_NAME):alpine-go$(1)-llvm$(2)" "$(DOCKER_HUB_REPO):alpine-go$(1)-llvm$(2)"
+	docker push "$(DOCKER_HUB_REPO):alpine-go$(1)-llvm$(2)"
+endef
+
+$(foreach go,$(RESOLVED_GO),$(foreach llvm,$(RESOLVED_LLVM),$(eval $(call PUSH_DOCKER_HUB_UBUNTU,$(go),$(llvm)))))
+$(foreach go,$(RESOLVED_GO),$(foreach llvm,$(RESOLVED_LLVM),$(eval $(call PUSH_DOCKER_HUB_ALPINE,$(go),$(llvm)))))
+
+# ---- Multi-arch Docker Hub build+push (buildx) ----
+# Builds for both linux/amd64 and linux/arm64, pushes directly to Docker Hub.
+# Requires buildx with multi-arch driver (docker-container).
+# Builder name: multiarch (create with: docker buildx create --name multiarch --driver docker-container --bootstrap)
+
+BUILDX_BUILDER ?= multiarch
+
+define BUILDX_DOCKER_HUB_UBUNTU
+buildx-docker-hub-ubuntu-22.04-go$(1)-llvm$(2):
+	@echo "=== [buildx] ubuntu-22.04 go$(1) llvm$(2) multi-arch ==="
+	docker buildx build \
+		--builder $(BUILDX_BUILDER) \
+		--platform linux/amd64,linux/arm64 \
+		--build-arg GO_VERSION="$(1)" \
+		--build-arg LLVM_VERSION="$(2)" \
+		-f Dockerfile.ubuntu \
+		-t "$(DOCKER_HUB_REPO):ubuntu-22.04-go$(1)-llvm$(2)" \
+		--push \
+		.
+endef
+
+define BUILDX_DOCKER_HUB_ALPINE
+buildx-docker-hub-alpine-go$(1)-llvm$(2):
+	@echo "=== [buildx] alpine go$(1) llvm$(2) multi-arch ==="
+	docker buildx build \
+		--builder $(BUILDX_BUILDER) \
+		--platform linux/amd64,linux/arm64 \
+		--build-arg GO_VERSION="$(1)" \
+		--build-arg LLVM_VERSION="$(2)" \
+		-f Dockerfile.alpine \
+		-t "$(DOCKER_HUB_REPO):alpine-go$(1)-llvm$(2)" \
+		--push \
+		.
+endef
+
+$(foreach go,$(RESOLVED_GO),$(foreach llvm,$(RESOLVED_LLVM),$(eval $(call BUILDX_DOCKER_HUB_UBUNTU,$(go),$(llvm)))))
+$(foreach go,$(RESOLVED_GO),$(foreach llvm,$(RESOLVED_LLVM),$(eval $(call BUILDX_DOCKER_HUB_ALPINE,$(go),$(llvm)))))
+
 # Ubuntu all-in-one
 build-ubuntu: $(addprefix build-,$(UBUNTU_TAGS))
 	@echo "All Ubuntu images done."
 
 push-ubuntu: $(addprefix push-,$(UBUNTU_TAGS))
-	@echo "All Ubuntu images pushed."
+	@echo "All Ubuntu images pushed to $(REGISTRY)."
+
+push-docker-hub-ubuntu: $(addprefix push-docker-hub-,$(UBUNTU_TAGS))
+	@echo "All Ubuntu images pushed to $(DOCKER_HUB_REPO)."
 
 # Alpine all-in-one
 build-alpine: $(addprefix build-,$(ALPINE_TAGS))
 	@echo "All Alpine images done."
 
 push-alpine: $(addprefix push-,$(ALPINE_TAGS))
-	@echo "All Alpine images pushed."
+	@echo "All Alpine images pushed to $(REGISTRY)."
+
+push-docker-hub-alpine: $(addprefix push-docker-hub-,$(ALPINE_TAGS))
+	@echo "All Alpine images pushed to $(DOCKER_HUB_REPO)."
+
+push-docker-hub: push-docker-hub-ubuntu push-docker-hub-alpine
+	@echo "=== All images pushed to $(DOCKER_HUB_REPO) ==="
+
+buildx-docker-hub-ubuntu: $(addprefix buildx-docker-hub-,$(UBUNTU_TAGS))
+	@echo "=== All Ubuntu multi-arch images built+push to $(DOCKER_HUB_REPO) ==="
+
+buildx-docker-hub-alpine: $(addprefix buildx-docker-hub-,$(ALPINE_TAGS))
+	@echo "=== All Alpine multi-arch images built+push to $(DOCKER_HUB_REPO) ==="
+
+buildx-docker-hub: buildx-docker-hub-ubuntu buildx-docker-hub-alpine
+	@echo "=== All multi-arch images pushed to $(DOCKER_HUB_REPO) ==="
 
 # All
 build-all: build-ubuntu build-alpine
@@ -182,4 +267,4 @@ clean:
 	@for tag in $(UBUNTU_TAGS) $(ALPINE_TAGS); do docker rmi "$(IMAGE_NAME):$$tag" 2>/dev/null || true; docker rmi "$(REGISTRY)/$(IMAGE_NAME):$$tag" 2>/dev/null || true; done
 	@echo "Done."
 
-.PHONY: help list build-all build-ubuntu build-alpine push push-ubuntu push-alpine clean
+.PHONY: help list build-all build-ubuntu build-alpine push push-ubuntu push-alpine push-docker-hub push-docker-hub-ubuntu push-docker-hub-alpine buildx-docker-hub buildx-docker-hub-ubuntu buildx-docker-hub-alpine clean
