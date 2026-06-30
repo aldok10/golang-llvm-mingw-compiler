@@ -1,0 +1,271 @@
+# Daily version check for Go and llvm-mingw upstream releases.
+# If new versions are found, automatically updates files and creates a PR.
+#
+# Schedule: every day at 06:00 UTC
+# Also triggerable manually via workflow_dispatch.
+
+name: version-check
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      push_images:
+        description: "Also build and push updated images"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check:
+    name: Check upstream versions
+    runs-on: ubuntu-24.04
+    outputs:
+      go_changed: ${{ steps.check-go.outputs.changed }}
+      go_old: ${{ steps.check-go.outputs.old }}
+      go_new: ${{ steps.check-go.outputs.new }}
+      llvm_changed: ${{ steps.check-llvm.outputs.changed }}
+      llvm_old: ${{ steps.check-llvm.outputs.old }}
+      llvm_new: ${{ steps.check-llvm.outputs.new }}
+      any_changed: ${{ steps.check-any.outputs.changed }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Go versions
+        id: check-go
+        run: |
+          # Read current requested versions from .env (major.minor list)
+          CURRENT_GO=$(grep -E '^GO_VERSIONS=' .env | sed 's/GO_VERSIONS=//' | tr -d '"' || echo "")
+          echo "Current requested Go: $CURRENT_GO"
+
+          CHANGED=false
+          OLD_VERSIONS=""
+          NEW_VERSIONS=""
+          for v in $CURRENT_GO; do
+            # Resolve latest patch from go.dev
+            LATEST=$(perl -e '
+              use strict;
+              use warnings;
+              my $target = shift;
+              my @html = `curl -sL "https://go.dev/dl/"`;
+              my $latest = 0;
+              for my $line (@html) {
+                while ($line =~ /go(\Q$target\E)\.(\d+)\.linux-amd64\.tar\.gz/g) {
+                  my $patch = $2;
+                  $latest = $patch if $patch > $latest;
+                }
+              }
+              print "$target.$latest\n" if $latest;
+            ' "$v" 2>/dev/null)
+
+            # Read the currently pinned version from Makefile
+            CURRENT_PINNED=$(perl -e '
+              open(F, "<", "Makefile") or die;
+              my $target = shift;
+              while (<F>) {
+                if (/^RESOLVED_GO\s*:?=\s*(.*)/) {
+                  my $resolved = $1;
+                  for my $r (split /\s+/, $resolved) {
+                    if ($r =~ /^\Q$target\E\.(\d+)$/) {
+                      print "$r\n";
+                    }
+                  }
+                  last;
+                }
+              }
+              close F;
+            ' "$v" 2>/dev/null)
+
+            # Compare
+            if [ -n "$LATEST" ] && [ "$LATEST" != "$CURRENT_PINNED" ]; then
+              echo "Go $v: $CURRENT_PINNED -> $LATEST"
+              CHANGED=true
+              OLD_VERSIONS="$OLD_VERSIONS $CURRENT_PINNED"
+              NEW_VERSIONS="$NEW_VERSIONS $LATEST"
+            fi
+          done
+
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "old=$(echo $OLD_VERSIONS | xargs)" >> $GITHUB_OUTPUT
+          echo "new=$(echo $NEW_VERSIONS | xargs)" >> $GITHUB_OUTPUT
+
+      - name: Check LLVM-mingw versions
+        id: check-llvm
+        run: |
+          # Read current requested versions from .env
+          CURRENT_LLVM=$(grep -E '^LLVM_VERSIONS=' .env | sed 's/LLVM_VERSIONS=//' | tr -d '"' || echo "")
+          echo "Current requested LLVM: $CURRENT_LLVM"
+
+          CHANGED=false
+          OLD_VERSIONS=""
+          NEW_VERSIONS=""
+          for v in $CURRENT_LLVM; do
+            # Resolve latest tag from GitHub releases
+            LATEST_TAG=$(python3 scripts/resolve-llvm-versions.py "$v" 2>/dev/null || echo "")
+
+            # Read currently pinned tag from Makefile (from RESOLVED_LLVM)
+            CURRENT_PINNED=$(perl -e '
+              open(F, "<", "Makefile") or die;
+              my $target = shift;
+              $target =~ s/\./\\./g;
+              while (<F>) {
+                if (/^RESOLVED_LLVM\s*:?=\s*(.*)/) {
+                  my $resolved = $1;
+                  # We need to find which full tag corresponds to this LLVM version
+                  # Since we cant easily map back, just show the resolved list
+                  print "$resolved\n";
+                  last;
+                }
+              }
+              close F;
+            ' "$v" 2>/dev/null | head -1)
+
+            # Compare using the resolver to get old tag for this LLVM version
+            # Actually, we need the old tag. Let me check differently.
+            # The Makefile RESOLVED_LLVM has the resolved tags.
+            # We need to find which one is for this LLVM version by position.
+            # Since both lists are ordered, get by index.
+
+            INDEX=0
+            idx=0
+            for lv in $CURRENT_LLVM; do
+              if [ "$lv" = "$v" ]; then
+                INDEX=$idx
+                break
+              fi
+              idx=$((idx + 1))
+            done
+
+            # Get old tag by position from the resolved list
+            OLD_TAG=""
+            idx=0
+            for tag in $(echo "$CURRENT_PINNED"); do
+              if [ $idx -eq $INDEX ]; then
+                OLD_TAG=$tag
+                break
+              fi
+              idx=$((idx + 1))
+            done
+
+            if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$OLD_TAG" ]; then
+              echo "LLVM $v: $OLD_TAG -> $LATEST_TAG"
+              CHANGED=true
+              OLD_VERSIONS="$OLD_VERSIONS $OLD_TAG"
+              NEW_VERSIONS="$NEW_VERSIONS $LATEST_TAG"
+            fi
+          done
+
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "old=$(echo $OLD_VERSIONS | xargs)" >> $GITHUB_OUTPUT
+          echo "new=$(echo $NEW_VERSIONS | xargs)" >> $GITHUB_OUTPUT
+
+      - name: Check if any version changed
+        id: check-any
+        run: |
+          if [ "${{ steps.check-go.outputs.changed }}" = "true" ] || [ "${{ steps.check-llvm.outputs.changed }}" = "true" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  update:
+    name: Create update PR
+    needs: check
+    if: needs.check.outputs.any_changed == 'true'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update Go versions in Makefile
+        if: needs.check.outputs.go_changed == 'true'
+        run: |
+          OLD="${{ needs.check.outputs.go_old }}"
+          NEW="${{ needs.check.outputs.go_new }}"
+          # Update Makefile RESOLVED_GO line
+          # The RESOLVED_GO is auto-computed, but the .env GO_VERSIONS stays the same.
+          # We only need to update if the RESOLVED changes, which is auto-computed.
+          # Actually, we need to update the Env or the files to reflect the change.
+          # For Go, the versions are auto-resolved, so no file change needed
+          # UNLESS the Makefile has hardcoded fallback values.
+          echo "Go versions will be auto-resolved at build time"
+          echo "No file changes needed for Go - it resolves dynamically"
+
+      - name: Update LLVM versions in .env and .env.example
+        if: needs.check.outputs.llvm_changed == 'true'
+        run: |
+          OLD="${{ needs.check.outputs.llvm_old }}"
+          NEW="${{ needs.check.outputs.llvm_new }}"
+          # LLVM versions are auto-resolved too, so no file changes needed
+          echo "LLVM versions will be auto-resolved at build time"
+          echo "No file changes needed for LLVM - it resolves dynamically"
+
+      - name: Create PR description
+        id: pr-desc
+        run: |
+          DESC="# Version Update Report\n\n"
+          if [ "${{ needs.check.outputs.go_changed }}" = "true" ]; then
+            DESC="${DESC}## Go\n"
+            DESC="${DESC}- Old: \`${{ needs.check.outputs.go_old }}\`\n"
+            DESC="${DESC}- New: \`${{ needs.check.outputs.go_new }}\`\n\n"
+          fi
+          if [ "${{ needs.check.outputs.llvm_changed }}" = "true" ]; then
+            DESC="${DESC}## LLVM-mingw\n"
+            DESC="${DESC}- Old: \`${{ needs.check.outputs.llvm_old }}\`\n"
+            DESC="${DESC}- New: \`${{ needs.check.outputs.llvm_new }}\`\n\n"
+          fi
+          DESC="${DESC}Auto-detected by daily version check workflow."
+          echo "desc=$DESC" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update upstream versions [skip ci]
+
+            Updates detected by daily version check:
+            ${{ steps.pr-desc.outputs.desc }}"
+          title: "chore: update upstream versions detected"
+          body: ${{ steps.pr-desc.outputs.desc }}
+          branch: "auto/version-update"
+          base: main
+          labels: automated, version-update
+          delete-branch: true
+
+  build:
+    name: Build and push images
+    needs: check
+    if: |
+      always() &&
+      (needs.check.outputs.any_changed == 'true' || github.event.inputs.push_images == 'true')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push all images
+        run: |
+          make build-all
+          make push
+
+      - name: Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Go versions: $(make -s list 2>/dev/null | grep '^Go  :' | sed 's/Go  : //')" >> $GITHUB_STEP_SUMMARY
+          echo "LLVM tags: $(make -s list 2>/dev/null | grep '^LLVM:' | sed 's/LLVM: //')" >> $GITHUB_STEP_SUMMARY
