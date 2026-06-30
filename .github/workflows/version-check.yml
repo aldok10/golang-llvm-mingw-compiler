@@ -219,6 +219,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
       - name: Build and push all images
         run: |
           # If check detected new major versions, use them; otherwise defaults from Makefile
@@ -227,11 +233,13 @@ jobs:
           if [ -n "$GO_MAJOR" ] && [ -n "$LLVM_MAJOR" ]; then
             echo "Building with latest versions: Go=$GO_MAJOR LLVM=$LLVM_MAJOR"
             make build-all GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
-            make push GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
+            make push        GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
+            make push-docker-hub GO_VERSIONS="$GO_MAJOR" LLVM_VERSIONS="$LLVM_MAJOR"
           else
             echo "Building with default versions from Makefile"
             make build-all
             make push
+            make push-docker-hub
           fi
 
       - name: Summary
