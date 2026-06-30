@@ -58,19 +58,17 @@ jobs:
       - name: Check Go patch versions
         id: check-go-patch
         run: |
-          RESOLVED=$(python3 scripts/resolve-go-versions.py ${{ env.CURRENT_GO }} 2>/dev/null || echo "resolve failed")
+          RESOLVED=$(python3 scripts/resolve-go-versions.py ${{ env.CURRENT_GO }} 2>/dev/null | tr '\n' ' ' | xargs || echo "resolve failed")
           echo "resolved=$RESOLVED" >> $GITHUB_OUTPUT
-          echo "Resolved Go patches:"
-          echo "$RESOLVED"
+          echo "Resolved Go patches: $RESOLVED"
 
       # === Check LLVM patch (informational) ===
       - name: Check LLVM-mingw patch versions
         id: check-llvm-patch
         run: |
-          RESOLVED=$(python3 scripts/resolve-llvm-versions.py ${{ env.CURRENT_LLVM }} 2>/dev/null || echo "resolve failed")
+          RESOLVED=$(python3 scripts/resolve-llvm-versions.py ${{ env.CURRENT_LLVM }} 2>/dev/null | tr '\n' ' ' | xargs || echo "resolve failed")
           echo "resolved=$RESOLVED" >> $GITHUB_OUTPUT
-          echo "Resolved LLVM tags:"
-          echo "$RESOLVED"
+          echo "Resolved LLVM tags: $RESOLVED"
 
       # === Check Go major versions ===
       - name: Check Go major versions
@@ -179,14 +177,7 @@ jobs:
             DESC="${DESC}- Old: \`${{ needs.check.outputs.llvm_major_current }}\`\n"
             DESC="${DESC}- New: \`${{ needs.check.outputs.llvm_major_latest }}\`\n\n"
           fi
-          if [ -n "${{ needs.check.outputs.go_resolved }}" ]; then
-            DESC="${DESC}## Go Resolved Patches\n"
-            DESC="${DESC}\`\`\`\n${{ needs.check.outputs.go_resolved }}\n\`\`\`\n\n"
-          fi
-          if [ -n "${{ needs.check.outputs.llvm_resolved }}" ]; then
-            DESC="${DESC}## LLVM-mingw Resolved Tags\n"
-            DESC="${DESC}\`\`\`\n${{ needs.check.outputs.llvm_resolved }}\n\`\`\`\n\n"
-          fi
+          # Patch versions are auto-resolved at build time, no config update needed.
           DESC="${DESC}---\nAuto-detected by daily version check workflow.\n\n"
           DESC="${DESC}> Patch versions are auto-resolved at build time — no config update needed for those."
           echo "desc=$DESC" >> $GITHUB_OUTPUT
