@@ -1,0 +1,6 @@
+* text=auto
+Dockerfile.* text
+Makefile text
+.gitignore text
+.gitattributes text
+.env text linguist-language=DotEnv
