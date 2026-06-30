@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
 resolve-llvm-versions.py
-Fetch latest llvm-mingw release tags from GitHub for given LLVM major.minor versions.
+Fetch latest llvm-mingw release tags from GitHub for given LLVM major.minor versions,
+or list the latest N major.minor versions available upstream.
 
-Usage: resolve-llvm-versions.py 22.1 21.1
+Usage (resolve tags): resolve-llvm-versions.py 22.1 21.1
 Output: 20260616 20251216 (one per line)
+
+Usage (list top N major.minor): resolve-llvm-versions.py --list [N]
+Output (default N=3): 22.1 21.1 20.1 (one per line, newest first)
 
 Matches by LLVM version embedded in release name, e.g.:
   "llvm-mingw 20260616 with LLVM 22.1.8" -> LLVM 22.1 -> tag 20260616
@@ -12,27 +16,30 @@ Matches by LLVM version embedded in release name, e.g.:
 
 import json
 import re
-import subprocess
 import sys
 from urllib.request import urlopen
 
-def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <llvm-major.minor> [...]", file=sys.stderr)
-        sys.exit(1)
 
-    wanted = sys.argv[1:]
+def parse_llvm_minor(v: str) -> tuple:
+    """Parse 'X.Y' into numeric tuple for comparison."""
+    parts = v.split(".")
+    return tuple(int(p) for p in parts)
 
-    try:
-        req = urlopen("https://api.github.com/repos/mstorsjo/llvm-mingw/releases?per_page=100", timeout=30)
-        data = json.loads(req.read())
-    except Exception as e:
-        print(f"WARNING: Failed to fetch releases: {e}", file=sys.stderr)
-        print("\n".join(wanted))
-        sys.exit(0)
 
-    # latest[llvm_minor] = (patch, tag)
+def fetch_llvm_releases():
+    """Fetch GitHub releases and return (latest_per_minor, all_minors_set).
+
+    latest_per_minor: {llvm_minor: (patch, tag)}
+    all_minors: set of all LLVM major.minor strings seen with ubuntu-22.04 assets.
+    """
+    req = urlopen(
+        "https://api.github.com/repos/mstorsjo/llvm-mingw/releases?per_page=100",
+        timeout=30,
+    )
+    data = json.loads(req.read())
+
     latest = {}
+    all_minors = set()
 
     for release in data:
         name = release.get("name", "")
@@ -43,12 +50,38 @@ def main():
         llvm_minor = m.group(1)
         patch = int(m.group(2))
 
-        has_asset = any("msvcrt-ubuntu-22.04" in a["name"] for a in release.get("assets", []))
+        has_asset = any(
+            "msvcrt-ubuntu-22.04" in a["name"] for a in release.get("assets", [])
+        )
         if not has_asset:
             continue
 
+        all_minors.add(llvm_minor)
+
         if llvm_minor not in latest or patch > latest[llvm_minor][0]:
             latest[llvm_minor] = (patch, tag)
+
+    return latest, all_minors
+
+
+def list_top_versions(n: int = 3):
+    """Output the top N LLVM major.minor versions sorted descending."""
+    _, all_minors = fetch_llvm_releases()
+    sorted_versions = sorted(all_minors, key=parse_llvm_minor, reverse=True)
+    for v in sorted_versions[:n]:
+        print(v)
+    if not sorted_versions:
+        print("WARNING: No LLVM versions found in GitHub releases", file=sys.stderr)
+
+
+def resolve_tags(wanted):
+    """Resolve each major.minor to its latest release tag."""
+    try:
+        latest, _ = fetch_llvm_releases()
+    except Exception as e:
+        print(f"WARNING: Failed to fetch releases: {e}", file=sys.stderr)
+        print("\n".join(wanted))
+        sys.exit(0)
 
     for v in wanted:
         if v in latest:
@@ -56,6 +89,35 @@ def main():
         else:
             print(f"WARNING: LLVM {v} not found, using as-is", file=sys.stderr)
             print(v)
+
+
+def main():
+    args = sys.argv[1:]
+
+    if not args:
+        print(
+            f"Usage: {sys.argv[0]} [--list [N]] <llvm-major.minor> [...]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if args[0] == "--list":
+        n = 3
+        if len(args) > 1:
+            try:
+                n = int(args[1])
+            except ValueError:
+                pass
+        try:
+            list_top_versions(n)
+        except Exception as e:
+            print(
+                f"WARNING: Failed to list LLVM versions: {e}", file=sys.stderr
+            )
+        return
+
+    resolve_tags(args)
+
 
 if __name__ == "__main__":
     main()
