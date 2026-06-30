@@ -26,7 +26,7 @@ IMAGE_NAME     ?= golang-llvm-mingw-compiler
 
 # ---- Auto-resolve Go patch versions ----
 # For each major.minor, fetch go.dev and find the latest patch.
-RESOLVED_GO := $(shell scripts/resolve-go-versions.pl $(GO_VERSIONS) 2>/dev/null)
+RESOLVED_GO := $(shell python3 scripts/resolve-go-versions.py $(GO_VERSIONS) 2>/dev/null)
 ifeq ($(strip $(RESOLVED_GO)),)
 RESOLVED_GO := $(GO_VERSIONS)
 endif
