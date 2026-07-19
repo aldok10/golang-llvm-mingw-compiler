@@ -1,4 +1,4 @@
 # Auto-maintained by version-check workflow.
 # DO NOT edit manually. Updated after successful builds.
-GO_RESOLVED=
-LLVM_RESOLVED=
+GO_RESOLVED=1.24.13 1.25.12 1.26.5
+LLVM_RESOLVED=20250709 20251216 20260616
