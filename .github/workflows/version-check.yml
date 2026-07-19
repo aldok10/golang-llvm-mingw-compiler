@@ -38,6 +38,7 @@ jobs:
       llvm_major_current: ${{ steps.check-llvm-major.outputs.current }}
       llvm_major_latest: ${{ steps.check-llvm-major.outputs.latest }}
       llvm_resolved: ${{ steps.check-llvm-patch.outputs.resolved }}
+      patch_changed: ${{ steps.check-patch.outputs.changed }}
       any_changed: ${{ steps.check-any.outputs.changed }}
 
     steps:
@@ -118,13 +119,35 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
+      # === Check patch/minor changes against lock file ===
+      - name: Check patch versions against lock file
+        id: check-patch
+        run: |
+          GO_RESOLVED="${{ steps.check-go-patch.outputs.resolved }}"
+          LLVM_RESOLVED="${{ steps.check-llvm-patch.outputs.resolved }}"
+
+          # Read last-built versions from lock file
+          LOCK_GO=$(sed -n 's/^GO_RESOLVED=//p' .versions-lock 2>/dev/null || echo "")
+          LOCK_LLVM=$(sed -n 's/^LLVM_RESOLVED=//p' .versions-lock 2>/dev/null || echo "")
+
+          if [ "$GO_RESOLVED" != "$LOCK_GO" ] || [ "$LLVM_RESOLVED" != "$LOCK_LLVM" ]; then
+            echo "Patch versions changed:"
+            echo "  Go:   '$LOCK_GO' -> '$GO_RESOLVED'"
+            echo "  LLVM: '$LOCK_LLVM' -> '$LLVM_RESOLVED'"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Patch versions unchanged"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
       # === Aggregate ===
       - name: Check if any version changed
         id: check-any
         run: |
           GO_MAJOR="${{ steps.check-go-major.outputs.changed }}"
           LLVM_MAJOR="${{ steps.check-llvm-major.outputs.changed }}"
-          if [ "$GO_MAJOR" = "true" ] || [ "$LLVM_MAJOR" = "true" ]; then
+          PATCH="${{ steps.check-patch.outputs.changed }}"
+          if [ "$GO_MAJOR" = "true" ] || [ "$LLVM_MAJOR" = "true" ] || [ "$PATCH" = "true" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -256,3 +279,25 @@ jobs:
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "Go versions: ${{ needs.check.outputs.go_major_latest }}" >> $GITHUB_STEP_SUMMARY
           echo "LLVM versions: ${{ needs.check.outputs.llvm_major_latest }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update versions lock file
+        run: |
+          GO_RESOLVED="${{ needs.check.outputs.go_resolved }}"
+          LLVM_RESOLVED="${{ needs.check.outputs.llvm_resolved }}"
+          cat > .versions-lock <<EOF
+          # Auto-maintained by version-check workflow.
+          # DO NOT edit manually. Updated after successful builds.
+          GO_RESOLVED=${GO_RESOLVED}
+          LLVM_RESOLVED=${LLVM_RESOLVED}
+          EOF
+          # Remove leading whitespace from heredoc
+          sed -i 's/^[[:space:]]*//' .versions-lock
+
+      - name: Commit versions lock
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .versions-lock
+          git diff --cached --quiet && echo "No lock changes" && exit 0
+          git commit -m "chore: update .versions-lock after build [skip ci]"
+          git push
